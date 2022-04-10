@@ -287,8 +287,11 @@ class Tunnel
     EventId TimeoutEventId;
     int timeout_period = 100; //milliseconds
     int waiting_time;
+    double waited_time;
     uint32_t counter;
     Ptr<OutputStreamWrapper> qDelayStream;
+    Ptr<OutputStreamWrapper> preSeqStream;
+    Ptr<OutputStreamWrapper> postSeqStream;
     // Calculate throughput
     double LinkThroughput(double duration)
     {
@@ -339,6 +342,8 @@ class Tunnel
         //
         // about 40 lines would work
 
+        double current_time;
+        uint32_t current_time_ms;
         packet_number = packet_id;
 
         if (packetQueue.size() != 0) {
@@ -346,7 +351,16 @@ class Tunnel
                 if (packetQueue.size() == 0) {break;}
 
                 MarkedPacket packet_temp = packetQueue.front();
+                cout << "sending (timeout)= " << packet_temp.seq_number << endl;
                 if (packet_temp.seq_number <= packet_number){
+                    if (packet_temp.seq_number == packet_number){
+                        packet_number++;
+                    }
+                    current_time = Simulator::Now ().GetSeconds ();
+                    current_time_ms = (uint32_t)Simulator::Now ().GetMilliSeconds ();
+                    waited_time = current_time_ms - packet_temp.enter_time;
+                    *qDelayStream->GetStream ()  << current_time << " " << waited_time << std::endl;
+                    *postSeqStream->GetStream ()  << current_time << " " << packet_temp.seq_number << std::endl;
                     if(packet_temp.tunnel_number==0){
                         m_msIfc0Tap->Receive (packet_temp.m_packet, 0x0800, m_msIfc0Tap->GetAddress (), m_msIfc0Tap->GetAddress (), NetDevice::PACKET_HOST);
                     }
@@ -354,28 +368,13 @@ class Tunnel
                         m_msIfc1Tap->Receive (packet_temp.m_packet, 0x0800, m_msIfc1Tap->GetAddress (), m_msIfc1Tap->GetAddress (), NetDevice::PACKET_HOST);
                     }
                     packetQueue.pop_front();
-                    packet_number++;
                 }else{
-                    uint32_t current_time = (uint32_t)Simulator::Now ().GetMilliSeconds ();
-                    waiting_time = timeout_period - (current_time - packet_temp.enter_time);
                     if (waiting_time < 0){
                         waiting_time = 0;
                     }
                     TimeoutEventId = Simulator::Schedule(MilliSeconds(waiting_time),&Tunnel::Timeout,this,packet_temp.seq_number);
                     break;
                 }
-                
-
-
-
-
-
-
-
-
-
-
-
                 // EDIT END
 
             } 
@@ -404,7 +403,8 @@ class Tunnel
         new_Packet.tunnel_number = tunnel_number;
         new_Packet.enter_time = (uint32_t)Simulator::Now ().GetMilliSeconds ();
         new_Packet.seq_number = (uint32_t)tagCopy.GetSimpleValue();
-        uint32_t current_time;
+        double current_time;
+        uint32_t current_time_ms;
 
         //////////////////////////////////////////
         // Cis 549 Project #4   Problem 1
@@ -447,27 +447,36 @@ class Tunnel
 
         // EDIT START
         // about 70 lines would work.
-        cout << "target Packet Seq#= " << packet_number << endl;
+        cout << "target number= " << packet_number << endl;
+        current_time = Simulator::Now ().GetSeconds ();
+        *preSeqStream->GetStream ()  << current_time << " " << new_Packet.seq_number << std::endl;
+//        packet_number = 0;
         if (new_Packet.seq_number <= packet_number){
             if (new_Packet.seq_number == packet_number){
                 Simulator::Cancel(TimeoutEventId);
                 packet_number++;
             }
+            cout << "sending(QueueRecv)=" << new_Packet.seq_number << endl;
+            waited_time = 0;
+            current_time_ms = (uint32_t)Simulator::Now ().GetMilliSeconds ();
+            *qDelayStream->GetStream ()  << current_time << " " << waited_time << std::endl;
+            *postSeqStream->GetStream ()  << current_time << " " << new_Packet.seq_number << std::endl;
             if(new_Packet.tunnel_number==0){
                 m_msIfc0Tap->Receive (new_Packet.m_packet, 0x0800, m_msIfc0Tap->GetAddress (), m_msIfc0Tap->GetAddress (), NetDevice::PACKET_HOST);
             }
             else{
                 m_msIfc1Tap->Receive (new_Packet.m_packet, 0x0800, m_msIfc1Tap->GetAddress (), m_msIfc1Tap->GetAddress (), NetDevice::PACKET_HOST);
             }
-            current_time = (uint32_t)Simulator::Now ().GetMilliSeconds ();
-            waiting_time = 0;
-            // *qDelayStream->GetStream ()  << current_time << " " << waiting_time << std::endl;
             if (packetQueue.size() != 0) {
                 while (packetQueue.size() != 0){
                     MarkedPacket front_Packet = packetQueue.front();
                     if (front_Packet.seq_number <= packet_number){
+                        current_time = Simulator::Now ().GetSeconds ();
+                        current_time_ms = (uint32_t)Simulator::Now ().GetMilliSeconds ();
+                        waited_time = current_time_ms - front_Packet.enter_time;
+                        *qDelayStream->GetStream ()  << current_time << " " << waited_time << std::endl;
+                        *postSeqStream->GetStream ()  << current_time << " " << front_Packet.seq_number << std::endl;
                         if(new_Packet.tunnel_number==0){
-
                             m_msIfc0Tap->Receive (front_Packet.m_packet, 0x0800, m_msIfc0Tap->GetAddress (), m_msIfc0Tap->GetAddress (), NetDevice::PACKET_HOST);
                         }
                         else{
@@ -481,6 +490,7 @@ class Tunnel
                         if (waiting_time < 0){
                             waiting_time = 0;
                         }
+                        cout << "see a gap, start timeout: " << endl;
                         TimeoutEventId = Simulator::Schedule(MilliSeconds(waiting_time),&Tunnel::Timeout,this,front_Packet.seq_number);
                         break;
                     }
@@ -488,6 +498,7 @@ class Tunnel
             }
         }
         else{
+            cout << "see a gap, put into queue: " << packetQueue.size() << endl;
             if (packetQueue.size() == 0) {
                 packetQueue.push_back(new_Packet);
                 waiting_time = timeout_period;
@@ -513,15 +524,6 @@ class Tunnel
                 }
             }
         }
-
-
-
-
-
-
-
-
-
         // EDIT END
 
     }
