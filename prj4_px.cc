@@ -292,6 +292,10 @@ class Tunnel
     Ptr<OutputStreamWrapper> qDelayStream;
     Ptr<OutputStreamWrapper> preSeqStream;
     Ptr<OutputStreamWrapper> postSeqStream;
+    Ptr<OutputStreamWrapper> throughputStreamLTE;
+    Ptr<OutputStreamWrapper> throughputStreamWiFi;
+    Ptr<OutputStreamWrapper> inDelayStreamLTE;
+    Ptr<OutputStreamWrapper> inDelayStreamWiFi;
     // Calculate throughput
     double LinkThroughput(double duration)
     {
@@ -776,6 +780,10 @@ public:
         qDelayStream = ascii.CreateFileStream ((prefix_file_name + "_delay" + ".dat").c_str ());
         preSeqStream = ascii.CreateFileStream ((prefix_file_name + "_preseq" + ".dat").c_str ());
         postSeqStream = ascii.CreateFileStream ((prefix_file_name + "_postseq" + ".dat").c_str ());
+        throughputStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_thp_in_lte" + ".dat").c_str ());
+        throughputStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
+        inDelayStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_dly_in_lte" + ".dat").c_str ());
+        inDelayStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
 
     }
     void SetUp (Ptr<Node> rt, Ptr<Node> msIfc0, Ptr<Node> msIfc1,
@@ -866,11 +874,6 @@ Ptr<OutputStreamWrapper> nextRxStream;
 Ptr<OutputStreamWrapper> inFlightStream;
 vector<Ptr<OutputStreamWrapper>> throughputStream;
 Ptr<OutputStreamWrapper> throughputAllDlStream;
-Ptr<OutputStreamWrapper> throughputStreamLTE;
-Ptr<OutputStreamWrapper> throughputStreamWiFi;
-Ptr<OutputStreamWrapper> inDelayStreamLTE;
-Ptr<OutputStreamWrapper> inDelayStreamWiFi;
-
 uint32_t cWndValue;
 uint32_t ssThreshValue;
 
@@ -1483,10 +1486,6 @@ int main(int argc, char *argv[]) {
 
     // Create throughput measurement file
     throughputAllDlStream = ascii.CreateFileStream ((prefix_file_name + "-throughput-ue-all" + ".dat").c_str ());
-    throughputStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_thp_in_lte" + ".dat").c_str ());
-    throughputStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
-    inDelayStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_dly_in_lte" + ".dat").c_str ());
-    inDelayStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
     // User downlink throughput measurement (bps)
     Simulator::Schedule (Seconds (0.1), &CalculateThroughput);
     ////////////////////////////////////////////////////////////////////
