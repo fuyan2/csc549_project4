@@ -772,8 +772,10 @@ public:
         m_rng = CreateObject<UniformRandomVariable> ();
         TunnelPort = UsedTunnelPort;
         UsedTunnelPort++;
-//        AsciiTraceHelper ascii;
-       qDelayStream = ascii.CreateFileStream ((prefix_file_name + "_delay" + ".dat").c_str ());
+        AsciiTraceHelper ascii;
+        qDelayStream = ascii.CreateFileStream ((prefix_file_name + "_delay" + ".dat").c_str ());
+        preSeqStream = ascii.CreateFileStream ((prefix_file_name + "_preseq" + ".dat").c_str ());
+        postSeqStream = ascii.CreateFileStream ((prefix_file_name + "_postseq" + ".dat").c_str ());
 
     }
     void SetUp (Ptr<Node> rt, Ptr<Node> msIfc0, Ptr<Node> msIfc1,
