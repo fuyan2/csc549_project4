@@ -296,19 +296,16 @@ class Tunnel
     Ptr<OutputStreamWrapper> throughputStreamWiFi;
     Ptr<OutputStreamWrapper> inDelayStreamLTE;
     Ptr<OutputStreamWrapper> inDelayStreamWiFi;
+    uint64_t CurrentTotal = 0;
+    uint64_t lastTotalRx = 0;
+
     // Calculate throughput
     double LinkThroughput(double duration)
     {
-        double totalDlThroughput = 0.0;
-
-        for (uint16_t i = 0; i < numberUE; i++) {
-            double cur = ((sink[i]->GetTotalRx() - lastTotalRx[i]) * (double) 8 / 1e6) * (1000.0 / duration); 
-            if (lastTotalRx[i] == 0) {cur = 0;}
-            lastTotalRx[i] = sink[i]->GetTotalRx ();
-            totalDlThroughput += cur;
-        }
-
-        return totalDlThroughput;
+        double thpt = ((CurrentTotal - lastTotalRx) * (double) 8 / 1e6) * (1000.0 / duration); 
+        // if (lastTotalRx == 0) {thpt = 0;}
+        lastTotalRx = CurrentTotal;
+        return thpt;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -407,6 +404,7 @@ class Tunnel
         new_Packet.tunnel_number = tunnel_number;
         new_Packet.enter_time = (uint32_t)Simulator::Now ().GetMilliSeconds ();
         new_Packet.seq_number = (uint32_t)tagCopy.GetSimpleValue();
+        CurrentTotal += packet->GetSize();
         double current_time;
         uint32_t current_time_ms;
 
@@ -614,7 +612,7 @@ bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& de
                 // Use both LTE and Wi-Fi networks are simultaniously used by a single traffic flow.
                 // This sample steering send one packet to LTE path and another packet to WiFi path and repeates
                 // totalPacketSent % 2 == 0 
-                double test_time = 100;
+                // double test_time = 100;
                 if ( throughputLTE >= throughputWiFi ) // toggle the transmission path between LTE and WiFi
                 {
                     // Use LTE path for DL traffic
@@ -783,7 +781,7 @@ public:
         throughputStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_thp_in_lte" + ".dat").c_str ());
         throughputStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
         inDelayStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_dly_in_lte" + ".dat").c_str ());
-        inDelayStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
+        inDelayStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_dly_in_wifi" + ".dat").c_str ());
 
     }
     void SetUp (Ptr<Node> rt, Ptr<Node> msIfc0, Ptr<Node> msIfc1,
@@ -880,8 +878,6 @@ uint32_t ssThreshValue;
 
 vector<Ptr<PacketSink>> sink;
 vector<uint64_t> lastTotalRx;
-int lastTotalTxPacket = 0;
-int lastTotalRxPacket = 0;
 
 void CalculateThroughput()
 {
