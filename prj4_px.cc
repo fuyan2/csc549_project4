@@ -238,8 +238,6 @@ TimeTag::GetSimpleValue (void) const
 
 //------------------------------------Tunneling---------------------------------//
 int UsedTunnelPort = 100;
-double throughputLTE = 10000; // a large number initially
-double throughputWiFi = 10000;
 
 class Tunnel
 {
@@ -296,16 +294,34 @@ class Tunnel
     Ptr<OutputStreamWrapper> throughputStreamWiFi;
     Ptr<OutputStreamWrapper> inDelayStreamLTE;
     Ptr<OutputStreamWrapper> inDelayStreamWiFi;
+    Ptr<OutputStreamWrapper> inputRateStreamLTE;
+    Ptr<OutputStreamWrapper> inputRateStreamWiFi;
     uint64_t CurrentTotal = 0;
     uint64_t lastTotalRx = 0;
-
+    uint64_t routerSent = 0;
+    double RATE_MEASUREMENT_INTERVAL_MS = 10;
+    double LINK_MEASUREMENT_INTERVAL_MS = 10;
+    bool useLTE = true; // 0 is for LTE, 1 is for WiFi
+    double throughputLTE = 10000; // a large number initially
+    double throughputWiFi = 10000;
+    double pre_throughput = 0;
+    vector<double> past_throughput;
     // Calculate throughput
-    double LinkThroughput(double duration)
+    void LinkThroughput()
     {
-        double thpt = ((CurrentTotal - lastTotalRx) * (double) 8 / 1e6) * (1000.0 / duration); 
+        double thpt = ((CurrentTotal - lastTotalRx) * (double) 8 / 1e6) * (1000.0 / LINK_MEASUREMENT_INTERVAL_MS); 
+        past_throughput.push_back(thpt);
+        pre_throughput = thpt;
         // if (lastTotalRx == 0) {thpt = 0;}
         lastTotalRx = CurrentTotal;
-        return thpt;
+        if(useLTE){
+            throughputLTE = thpt;
+            *throughputStreamLTE->GetStream ()  << Simulator::Now().GetSeconds() << " " << thpt << std::endl;
+        }else{
+            throughputWiFi = thpt;
+            *throughputStreamWiFi->GetStream ()  << Simulator::Now().GetSeconds() << " " << thpt << std::endl;
+        }
+        Simulator::Schedule(MilliSeconds(LINK_MEASUREMENT_INTERVAL_MS),&Tunnel::LinkThroughput,this);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -549,10 +565,23 @@ class Tunnel
         return true;
     }
 
+void RouterTimer()
+{
 
-// void RouterTimer(uint32_t packet_id) {
-//     return;
-// }
+    double rate = (routerSent * (double) 8 / 1e6) * (1000.0 / RATE_MEASUREMENT_INTERVAL_MS); 
+    routerSent = 0;
+    if (useLTE){
+        *inputRateStreamLTE->GetStream ()  << Simulator::Now ().GetSeconds () << " " << rate << std::endl;
+    }else{
+        *inputRateStreamWiFi->GetStream ()  << Simulator::Now ().GetSeconds () << " " << rate << std::endl;
+    }
+    
+
+   
+
+    Simulator::Schedule(MilliSeconds(RATE_MEASUREMENT_INTERVAL_MS),&Tunnel::RouterTimer,this);
+}
+
 bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& dest, uint16_t protocolNumber)
     // DL traffic from a router toward UE                                      //
     // When sending a packet from the sender (router,PGW)                          //
@@ -565,7 +594,7 @@ bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& de
         TimeTag timetag;
         timetag.SetSimpleValue (Simulator::Now().GetMilliSeconds());   // add packet sent time at the router
         packet->AddByteTag(timetag);                                   // attach the transmission time at the router
-
+        routerSent += packet->GetSize();
         if (Scenario == AGGREGATE) {
             totalPacketSent++;
 
@@ -595,12 +624,14 @@ bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& de
 
             if (aggPath.compare("lteOnly") == 0) {
                 // Test #1 :::: This uses LTE path ONLY for DL traffic
+                useLTE = true;
                 m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc0Address, TunnelPort));  //m_msIfc0Address : send to the LTE path
             }
             else if (aggPath.compare("wifiOnly") == 0) {
                 // OR
 
                 // TEST #2  ::::: This uses Wi-Fi path ONLY for DL traffic
+                useLTE = false;
                 m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc1Address, TunnelPort));   // m_msIfc1Address: send to the Wi-Fi path
             }
             else if (aggPath.compare("lteAndWifi") == 0) {
@@ -613,17 +644,62 @@ bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& de
                 // This sample steering send one packet to LTE path and another packet to WiFi path and repeates
                 // totalPacketSent % 2 == 0 
                 // double test_time = 100;
-                if ( throughputLTE >= throughputWiFi ) // toggle the transmission path between LTE and WiFi
-                {
-                    // Use LTE path for DL traffic
-                    // TimeoutEventId = Simulator::Schedule(MilliSeconds(test_time),&RouterTimer, "LTE");
-                    m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc0Address, TunnelPort));
+
+                // Method 1: change channel if throughput lower than previous one
+                // if (useLTE){
+                //     if(throughputLTE >= pre_throughput){
+                //         useLTE = true;
+                //         m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc0Address, TunnelPort));
+                //     }
+                //     else{
+                //         useLTE = false;
+                //         m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc1Address, TunnelPort));
+                //     }
+                // }else{
+                //     if(throughputWiFi >= pre_throughput){
+                //         useLTE = false;
+                //         m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc1Address, TunnelPort));
+                //     }
+                //     else{
+                //         useLTE = true;
+                //         m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc0Address, TunnelPort));
+                //     }
+                // }
+
+                // Method 2: change channel if throughput lower than previous 3 average
+                double total = 0;
+                double avg = 0;
+                if(past_throughput.size() > 4){
+                    for(int i=1; i<4;i++){
+                        total+= past_throughput[-i];
+                    }
+                    avg = total/4;
+                }else{
+                    for(unsigned int i=0; i<past_throughput.size();i++){
+                        total+= past_throughput[i];
+                    }
+                    avg = total/past_throughput.size();
                 }
-                else
-                {
-                    // use Wi-Fi path DL traffic
-                    // TimeoutEventId = Simulator::Schedule(MilliSeconds(test_time),&RouterTimer, "WiFi");
-                    m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc1Address, TunnelPort));
+
+
+                if (useLTE){
+                    if(throughputLTE >= avg){
+                        useLTE = true;
+                        m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc0Address, TunnelPort));
+                    }
+                    else{
+                        useLTE = false;
+                        m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc1Address, TunnelPort));
+                    }
+                }else{
+                    if(throughputWiFi >= avg){
+                        useLTE = false;
+                        m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc1Address, TunnelPort));
+                    }
+                    else{
+                        useLTE = true;
+                        m_rtSocket->SendTo (packet, 0, InetSocketAddress (m_msIfc0Address, TunnelPort));
+                    }
                 }
 
                 // EDIT END
@@ -700,8 +776,8 @@ bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& de
             cout << "One-way delay= " <<  one_way_delay << " ms" << endl;
             *inDelayStreamLTE->GetStream ()  << now_s << " " << one_way_delay << std::endl;
 
-            throughputLTE = LinkThroughput(one_way_delay);
-            *throughputStreamLTE->GetStream ()  << now_s << " " << throughputLTE << std::endl;
+            // throughputLTE = LinkThroughput();
+            // *throughputStreamLTE->GetStream ()  << now_s << " " << throughputLTE << std::endl;
 
             ///////////////////////////////////////////
 
@@ -748,8 +824,8 @@ bool rtVirtualSend (Ptr<Packet> packet, const Address& source, const Address& de
             cout << "One-way delay= " <<  one_way_delay << " ms" << endl;
             *inDelayStreamWiFi->GetStream ()  << now_s << " " << one_way_delay << std::endl;
 
-            throughputWiFi = LinkThroughput(one_way_delay);
-            *throughputStreamWiFi->GetStream ()  << now_s << " " << throughputLTE << std::endl;
+            // throughputWiFi = LinkThroughput();
+            // *throughputStreamWiFi->GetStream ()  << now_s << " " << throughputLTE << std::endl;
 
             ///////////////////////////////////////////
 
@@ -782,6 +858,8 @@ public:
         throughputStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_thp_in_wifi" + ".dat").c_str ());
         inDelayStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_dly_in_lte" + ".dat").c_str ());
         inDelayStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_dly_in_wifi" + ".dat").c_str ());
+        inputRateStreamWiFi = ascii.CreateFileStream ((prefix_file_name+"_input_rate_wifi" + ".dat").c_str ());
+        inputRateStreamLTE = ascii.CreateFileStream ((prefix_file_name+"_input_rate_LTE" + ".dat").c_str ());
 
     }
     void SetUp (Ptr<Node> rt, Ptr<Node> msIfc0, Ptr<Node> msIfc1,
@@ -843,8 +921,10 @@ public:
         // rt tap device
         // Once we want to send any packet from router (router, PGW)          //
         // We will call rtVirtualSend                                         //
+        Simulator::Schedule(MilliSeconds(RATE_MEASUREMENT_INTERVAL_MS),&Tunnel::RouterTimer,this);
+        Simulator::Schedule(MilliSeconds(LINK_MEASUREMENT_INTERVAL_MS),&Tunnel::LinkThroughput,this);
         m_rtTap = CreateObject<VirtualNetDevice> ();
-        m_rtTap->SetAddress (Mac48Address::Allocate());
+        m_rtTap->SetAddress (Mac48Address::Allocate());      
         m_rtTap->SetSendCallback (MakeCallback (&Tunnel::rtVirtualSend, this));
         rt->AddDevice (m_rtTap);
         ipv4 = rt->GetObject<Ipv4> ();
